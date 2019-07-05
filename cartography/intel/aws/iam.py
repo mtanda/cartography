@@ -70,9 +70,23 @@ def get_role_policies(session, role_name):
     return {'PolicyNames': policy_names}
 
 
+def get_role_managed_policies(session, role_name):
+    client = session.client('iam')
+    paginator = client.get_paginator('list_attached_role_policies')
+    policy_arns = []
+    for page in paginator.paginate(RoleName=role_name):
+        policy_arns.extend(page['PolicyArns'])
+    return {'PolicyArns': policy_arns}
+
+
 def get_role_policy_info(session, role_name, policy_name):
     client = session.client('iam')
     return client.get_role_policy(RoleName=role_name, PolicyName=policy_name)
+
+
+def get_role_managed_policy_info(session, role_name, policy_arn):
+    client = session.client('iam')
+    return client.get_policy(RoleName=role_name, PolicyArn=policy_arn)
 
 
 def get_account_access_key_data(session, username):
@@ -309,6 +323,29 @@ def load_role_policies(session, role_policies, aws_update_tag):
                 )
 
 
+def load_role_managed_policies(session, role_policies, aws_update_tag):
+    ingest_policies_assume_role = """
+    MATCH (role:AWSRole{name: {RoleName}})
+    WITH role
+    MERGE (policy:AWSPolicy{arn: {PolicyArn}})
+    ON CREATE SET policy.firstseen = timestamp()
+    SET policy.lastupdated = {aws_update_tag}
+    WITH policy, role
+    MERGE (role)-[r:TEST_POLICY]->(policy)
+    ON CREATE SET r.firstseen = timestamp()
+    SET r.lastupdated = {aws_update_tag}
+    """
+
+    for role_name, policies in role_policies.items():
+        for policy_arn, policy_data in policies.items():
+            session.run(
+                ingest_policies_assume_role,
+                RoleName=role_name,
+                PolicyArn=policy_arn,
+                aws_update_tag=aws_update_tag
+            )
+
+
 def load_user_access_keys(session, user_access_keys, aws_update_tag):
     # TODO change the node label to reflect that this is a user access key, not an account access key
     ingest_account_key = """
@@ -418,6 +455,28 @@ def sync_role_policies(neo4j_session, boto3_session, current_aws_account_id, aws
     )
 
 
+def sync_role_managed_policies(neo4j_session, boto3_session, current_aws_account_id, aws_update_tag, common_job_parameters):
+    logger.debug("Syncing IAM role managed policies for account '%s'.", current_aws_account_id)
+    query = """
+    MATCH (role:AWSRole)<-[:AWS_ROLE]-(AWSAccount{id: {AWS_ACCOUNT_ID}})
+    WHERE exists(role.name)
+    RETURN role.name AS name;
+    """
+    result = neo4j_session.run(query, AWS_ACCOUNT_ID=current_aws_account_id)
+    roles = [r['name'] for r in result]
+    roles_policies = {}
+    for role_name in roles:
+        roles_policies[role_name] = {}
+        for policy_arn in get_role_managed_policies(boto3_session, role_name)['PolicyNames']:
+            roles_policies[role_name][policy_arn] = get_role_managed_policy_info(boto3_session, role_name, policy_arn)
+    load_role_managed_policies(neo4j_session, roles_policies, aws_update_tag)
+    #run_cleanup_job(
+    #    'aws_import_roles_policy_cleanup.json',
+    #    neo4j_session,
+    #    common_job_parameters
+    #)
+
+
 def sync_user_access_keys(neo4j_session, boto3_session, current_aws_account_id, aws_update_tag, common_job_parameters):
     logger.debug("Syncing IAM user access keys for account '%s'.", current_aws_account_id)
     query = "MATCH (user:AWSUser)<-[:RESOURCE]-(AWSAccount{id: {AWS_ACCOUNT_ID}}) return user.name as name"
@@ -441,5 +500,6 @@ def sync(neo4j_session, boto3_session, account_id, update_tag, common_job_parame
     sync_group_memberships(neo4j_session, boto3_session, account_id, update_tag, common_job_parameters)
     sync_group_policies(neo4j_session, boto3_session, account_id, update_tag, common_job_parameters)
     sync_role_policies(neo4j_session, boto3_session, account_id, update_tag, common_job_parameters)
+    sync_role_managed_policies(neo4j_session, boto3_session, account_id, update_tag, common_job_parameters)
     sync_user_access_keys(neo4j_session, boto3_session, account_id, update_tag, common_job_parameters)
     run_cleanup_job('aws_import_principals_cleanup.json', neo4j_session, common_job_parameters)
