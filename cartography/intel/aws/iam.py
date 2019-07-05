@@ -85,9 +85,9 @@ def get_role_policy_info(session, role_name, policy_name):
     return client.get_role_policy(RoleName=role_name, PolicyName=policy_name)
 
 
-def get_role_managed_policy_info(session, role_name, policy_arn):
+def get_role_managed_policy_info(session, policy_arn):
     client = session.client('iam')
-    return client.get_policy(RoleName=role_name, PolicyArn=policy_arn)
+    return client.get_policy(PolicyArn=policy_arn)
 
 
 def get_account_access_key_data(session, username):
@@ -468,8 +468,8 @@ def sync_role_managed_policies(neo4j_session, boto3_session, current_aws_account
     roles_policies = {}
     for role_name in roles:
         roles_policies[role_name] = {}
-        for policy_arn in get_role_managed_policies(boto3_session, role_name)['PolicyNames']:
-            roles_policies[role_name][policy_arn] = get_role_managed_policy_info(boto3_session, role_name, policy_arn)
+        for policy_arn in get_role_managed_policies(boto3_session, role_name)['PolicyArns']:
+            roles_policies[role_name][policy_arn] = get_role_managed_policy_info(boto3_session, policy_arn)
     load_role_managed_policies(neo4j_session, roles_policies, aws_update_tag)
     #run_cleanup_job(
     #    'aws_import_roles_policy_cleanup.json',
