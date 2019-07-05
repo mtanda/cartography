@@ -75,7 +75,8 @@ def get_role_managed_policies(session, role_name):
     paginator = client.get_paginator('list_attached_role_policies')
     policy_arns = []
     for page in paginator.paginate(RoleName=role_name):
-        policy_arns.extend(page['PolicyArns'])
+        for policy in page['AttachedPolicies']:
+          policy_arns.append(policy['PolicyArn'])
     return {'PolicyArns': policy_arns}
 
 
