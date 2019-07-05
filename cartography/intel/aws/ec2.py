@@ -108,6 +108,10 @@ def load_ec2_instances(session, data, region, current_aws_account_id, aws_update
     MERGE (aa)-[r:RESOURCE]->(instance)
     ON CREATE SET r.firstseen = timestamp()
     SET r.lastupdated = {aws_update_tag}
+    WITH instance
+    MERGE (role:AWSRole{arn: {RoleArn}})
+    ON CREATE SET role.firstseen = timestamp()
+    SET role.lastupdated = {aws_update_tag}
     """
 
     ingest_security_groups = """
@@ -162,6 +166,7 @@ def load_ec2_instances(session, data, region, current_aws_account_id, aws_update
                 ImageId=instance.get("ImageId", ""),
                 SubnetId=instance.get("SubnetId", ""),
                 InstanceType=instance.get("InstanceType", ""),
+                RoleArn="foo",
                 ReservationId=reservation_id,
                 MonitoringState=monitoring_state,
                 LaunchTime=str(launch_time),
